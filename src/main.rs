@@ -205,33 +205,33 @@ fn is_blank_match(e: Expr, p: Expr) -> bool {
 
 fn my_match(
     ex: Expr,
-    mut pat: Expr,
+    pat: Expr,
     pos: &Vec<usize>,
-    mut pos_map: &mut HashMap<Vec<usize>, Expr>,
+    pos_map: &mut HashMap<Vec<usize>, Expr>,
 ) -> bool {
     println!("{pos:?} | {ex} | {pat} | {pos_map:?}");
-    //    if let Some(replacement) = pos_map.get(pos) {
-
-    //         // if
-    //         pat = replacement.clone();
-    //     }
-
     let pat_syms = vec![sym("blank"), sym("blank_seq")];
     match (ex.clone(), pat.clone()) {
         (Expr::Sym(e), Expr::Sym(p)) => ex == pat,
         (Expr::Sym(e), Expr::List(ps)) => {
             if pat_syms.contains(&ps[0]) {
                 // if let Some()
-                pos_map.insert(pos.clone(), ex);
-                true
+                if is_blank_match(ex.clone(), pat.clone()) {
+                    pos_map.insert(pos.clone(), ex);
+                    true
+                } else {
+                    false
+                }
             } else {
                 false
             }
         }
         (Expr::List(es), Expr::List(ps)) => {
             if pat_syms.contains(&ps[0]) {
-                pos_map.insert(pos.clone(), ex);
-                return true;
+                if is_blank_match(ex.clone(), pat.clone()) {
+                    pos_map.insert(pos.clone(), ex);
+                    return true
+                }
             }
 
             let mut new_pos = pos.clone();
@@ -246,11 +246,18 @@ fn my_match(
                 if head(pi.clone()) == sym("blank_seq") {
                     'inner: for j in 1..=es[1..].len() {
                         let mut elts = vec![sym("sequence")];
+                        // im pretty sure this is not needed
                         if i + j > es.len() {
                             println!("breaking news!");
                             break 'outer;
                         }
                         for seq_e in &es[i..i + j] {
+                            if pi.len() == 2 {
+                                let b_head = &pi[1];
+                                if b_head != &head(seq_e.clone()) {
+                                    break;
+                                }
+                            }
                             elts.push(seq_e.clone());
                         }
                         let seq = liste(elts);
@@ -259,12 +266,10 @@ fn my_match(
                         let new_pat = rebuild_and_splice(pat.clone(), &pos, pos_map);
                         println!("new_pat in bs: at iter {j} {new_pat}");
                         let mut copy = pos_map.clone();
-                        // this is to avoid double application of a pos rule 
+                        // this is to avoid double application of a pos rule
                         copy.remove(&new_pos);
                         // if my_match(ex.clone(), pat.clone(), pos, &mut copy) {
                         if my_match(ex.clone(), new_pat, pos, &mut copy) {
-
-                        
                             pos_map.clear();
                             pos_map.extend(copy);
 
@@ -317,13 +322,7 @@ fn main() {
         //     liste(vec![sym("f"), blank.clone(), blank.clone()]),
         //     true,
         // ), // List, sym, with blank
-        // (sym("f"), list(vec!["blank", "Sym"]), true),
-        // (sym("f"), list(vec!["blank", "f"]), false),
-        // (list(vec!["f", "x"]), list(vec!["blank", "f"]), true),
-        // (list(vec!["f", "x"]), list(vec!["blank", "g"]), false),
-        // (parse("(f (a b))"), parse("(f (blank))"), true),
-        // (parse("(f (a b))"), parse("(f (blank a))"), true),
-        // (parse("(f x)"), parse("((blank) (blank))"), true),
+
         // (parse("f"), parse("(pattern x (blank))"), true),
         // (parse("(f)"), parse("(pattern x (blank))"), true),
         // (parse("(f x)"), parse("((pattern x (blank)) (blank))"), true),
@@ -414,11 +413,23 @@ fn main() {
             parse("(f (blank_seq) (blank_seq))"),
             true,
         ),
-        // (parse("((k a b b) b)"), parse("((k (blank_seq)) b)"), true),
         (parse("(f b b)"), parse("(f (blank_seq))"), true),
         (parse("(f a b b)"), parse("(f (blank_seq))"), true),
         (parse("(f)"), parse("(f (blank_seq))"), false),
-        (parse("(f (a b) (a c) (a d))"), parse("(f (blank_seq))"), true),
+        (
+            parse("(f (a b) (a c) (a d))"),
+            parse("(f (blank_seq))"),
+            true,
+        ),
+        (parse("((k a b b) b)"), parse("((k (blank_seq)) b)"), true),
+        // with head
+        (sym("f"), list(vec!["blank", "Sym"]), true),
+        (sym("f"), list(vec!["blank", "f"]), false),
+        (list(vec!["f", "x"]), list(vec!["blank", "f"]), true),
+        (list(vec!["f", "x"]), list(vec!["blank", "g"]), false),
+        (parse("(f (a b))"), parse("(f (blank))"), true),
+        (parse("(f (a b))"), parse("(f (blank a))"), true),
+        (parse("(f x)"), parse("((blank) (blank))"), true),
     ];
 
     // list(vec!["f", "a", "b", "c"]), list(vec!["f", sym("blank_sequence")])
