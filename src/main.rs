@@ -101,8 +101,28 @@ fn named_rebuild_all(expr: Expr, map: &HashMap<Expr, Expr>) -> Expr {
     }
 }
 
+fn get_expr_at_pos(expr: &Expr, pos: &[usize]) -> Option<Expr> {
+    let mut current_expr = expr;
+    for &index in pos {
+        match current_expr {
+            Expr::List(es) => {
+                if index >= es.len() {
+                    return None;
+                }
+                current_expr = &es[index];
+            }
+            Expr::Sym(_) => {
+                return None; // Not possible to navigate deeper from a symbol
+            }
+        }
+    }
+    Some(current_expr.clone())
+}
+
+// let pat_syms = vec![sym("blank"), sym("blank_seq")];
 fn pos_map_rebuild(pos: Vec<usize>, pat: Expr, pos_map: &HashMap<Vec<usize>, Expr>) -> Expr {
     if let Some(replacement) = pos_map.get(&pos) {
+        // if
         return replacement.clone();
     }
 
@@ -185,17 +205,23 @@ fn is_blank_match(e: Expr, p: Expr) -> bool {
 
 fn my_match(
     ex: Expr,
-    pat: Expr,
+    mut pat: Expr,
     pos: &Vec<usize>,
-    pos_map: &mut HashMap<Vec<usize>, Expr>,
+    mut pos_map: &mut HashMap<Vec<usize>, Expr>,
 ) -> bool {
     println!("{pos:?} | {ex} | {pat} | {pos_map:?}");
+    //    if let Some(replacement) = pos_map.get(pos) {
+
+    //         // if
+    //         pat = replacement.clone();
+    //     }
 
     let pat_syms = vec![sym("blank"), sym("blank_seq")];
     match (ex.clone(), pat.clone()) {
         (Expr::Sym(e), Expr::Sym(p)) => ex == pat,
         (Expr::Sym(e), Expr::List(ps)) => {
             if pat_syms.contains(&ps[0]) {
+                // if let Some()
                 pos_map.insert(pos.clone(), ex);
                 true
             } else {
@@ -220,7 +246,8 @@ fn my_match(
                 if head(pi.clone()) == sym("blank_seq") {
                     'inner: for j in 1..=es[1..].len() {
                         let mut elts = vec![sym("sequence")];
-                        if i+j > es.len() {
+                        if i + j > es.len() {
+                            println!("breaking news!");
                             break 'outer;
                         }
                         for seq_e in &es[i..i + j] {
@@ -228,10 +255,21 @@ fn my_match(
                         }
                         let seq = liste(elts);
                         pos_map.insert(new_pos.clone(), seq.clone());
-                        
+
                         let new_pat = rebuild_and_splice(pat.clone(), &pos, pos_map);
-                        println!("new_pat in bs: {new_pat}");
-                        if my_match(ex.clone(), new_pat, pos, pos_map) {
+                        println!("new_pat in bs: at iter {j} {new_pat}");
+                        let mut copy = pos_map.clone();
+                        // this is to avoid double application of a pos rule 
+                        copy.remove(&new_pos);
+                        // if my_match(ex.clone(), pat.clone(), pos, &mut copy) {
+                        if my_match(ex.clone(), new_pat, pos, &mut copy) {
+
+                        
+                            pos_map.clear();
+                            pos_map.extend(copy);
+
+                            pos_map.insert(new_pos.clone(), seq.clone());
+
                             break 'outer;
                         } else {
                             // break 'outer;
@@ -244,7 +282,15 @@ fn my_match(
                     }
                 }
             }
-
+            // in the case of (f a b b) | (f (blank_seq))
+            // the problem is we end up with somehow pat is (f a b) with a map [1] -> (seq a b)
+            // which then rebuild ends up changing (f a b) -> (f a b b) prematurely giving equality.
+            // we get pat (f a) but still have [1]->a  and so we do a->a a second time.
+            // which isnt aproblem on that iteration but if you do (f (blank_seq)) -> [1]-> seq a b
+            // you get (f a b), then apply [1] -> seq a b again and you get (f a b b) which returns a, b as the "correct seq" for [1]
+            // so maybe its possible that we need to remove an entry in the map
+            // i wonder if we could just not apply the rule if we dont see a blank there (meaning its already applied)
+            // i feel like that is probably wrong somehow
             let final_pat = rebuild_and_splice(pat.clone(), &pos, pos_map);
             println!("final comparison: POS: {pos:?} | PAT: {pat} | NEW_PAT: {final_pat} | EX: {ex} || {pos_map:?}");
             if final_pat == ex {
@@ -354,20 +400,25 @@ fn main() {
         //     parse("(f (blank_seq a))"),
         //     false,
         // ),
-        
         (parse("(f a b c)"), parse("(f (blank_seq))"), true),
         (parse("(f a b c)"), parse("((blank) (blank_seq))"), true),
-        
         (parse("((k a) b)"), parse("((k a) b)"), true),
         (parse("((k a) b)"), parse("((k (blank)) b)"), true),
-        (parse("(f a b c)"), parse("(f (blank_seq) (blank) (blank_seq))"), true),
-        
-        (parse("(f a b c)"), parse("(f (blank_seq) (blank_seq))"), true),
-        
-        
+        (
+            parse("(f a b c)"),
+            parse("(f (blank_seq) (blank) (blank_seq))"),
+            true,
+        ),
+        (
+            parse("(f a b c)"),
+            parse("(f (blank_seq) (blank_seq))"),
+            true,
+        ),
         // (parse("((k a b b) b)"), parse("((k (blank_seq)) b)"), true),
+        (parse("(f b b)"), parse("(f (blank_seq))"), true),
         (parse("(f a b b)"), parse("(f (blank_seq))"), true),
-        // (parse("(a a)"), parse("(a blank_seq)"), true),
+        (parse("(f)"), parse("(f (blank_seq))"), false),
+        (parse("(f (a b) (a c) (a d))"), parse("(f (blank_seq))"), true),
     ];
 
     // list(vec!["f", "a", "b", "c"]), list(vec!["f", sym("blank_sequence")])
@@ -378,7 +429,7 @@ fn main() {
         // let mut named_map = HashMap::new();
         let m = my_match(ex.clone(), pat.clone(), &pos, &mut pos_map);
         let rebuilt_ex = rebuild_and_splice(pat.clone(), &vec![], &pos_map);
-        println!("rebuilt:{rebuilt_ex}\n\npos:\n{pos_map:?}\n\n\n");
+        println!("ex: {ex} | rebuilt:{rebuilt_ex}\n\npos:\n{pos_map:?}\n\n\n");
 
         assert_eq!(m, *expected);
 
