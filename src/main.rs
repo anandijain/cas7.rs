@@ -101,28 +101,9 @@ fn named_rebuild_all(expr: Expr, map: &HashMap<Expr, Expr>) -> Expr {
     }
 }
 
-fn get_expr_at_pos(expr: &Expr, pos: &[usize]) -> Option<Expr> {
-    let mut current_expr = expr;
-    for &index in pos {
-        match current_expr {
-            Expr::List(es) => {
-                if index >= es.len() {
-                    return None;
-                }
-                current_expr = &es[index];
-            }
-            Expr::Sym(_) => {
-                return None; // Not possible to navigate deeper from a symbol
-            }
-        }
-    }
-    Some(current_expr.clone())
-}
-
 // let pat_syms = vec![sym("blank"), sym("blank_seq")];
 fn pos_map_rebuild(pos: Vec<usize>, pat: Expr, pos_map: &HashMap<Vec<usize>, Expr>) -> Expr {
     if let Some(replacement) = pos_map.get(&pos) {
-        // if
         return replacement.clone();
     }
 
@@ -139,10 +120,6 @@ fn pos_map_rebuild(pos: Vec<usize>, pat: Expr, pos_map: &HashMap<Vec<usize>, Exp
             Expr::List(new_es)
         }
     }
-}
-
-fn rebuild_all(pat: Expr, pos_map: &HashMap<Vec<usize>, Expr>) -> Expr {
-    pos_map_rebuild(vec![], pat, pos_map)
 }
 
 fn splice_sequences(expr: Expr) -> Expr {
@@ -178,11 +155,14 @@ fn splice_sequences(expr: Expr) -> Expr {
 
 fn rebuild_and_splice(
     pat: Expr,
-    // named_map: &HashMap<Expr, Expr>,
     pos: &Vec<usize>,
     pos_map: &HashMap<Vec<usize>, Expr>,
+    named_map: &HashMap<Expr, Expr>,
 ) -> Expr {
-    splice_sequences(pos_map_rebuild(pos.clone(), pat, pos_map))
+    splice_sequences(named_rebuild_all(
+        pos_map_rebuild(pos.clone(), pat, pos_map),
+        named_map,
+    ))
 }
 
 // we assume that p has a blank object for a head
@@ -208,14 +188,25 @@ fn my_match(
     pat: Expr,
     pos: &Vec<usize>,
     pos_map: &mut HashMap<Vec<usize>, Expr>,
+    named_map: &mut HashMap<Expr, Expr>,
 ) -> bool {
     println!("{pos:?} | {ex} | {pat} | {pos_map:?}");
     let pat_syms = vec![sym("blank"), sym("blank_seq")];
     match (ex.clone(), pat.clone()) {
         (Expr::Sym(e), Expr::Sym(p)) => ex == pat,
         (Expr::Sym(e), Expr::List(ps)) => {
-            if pat_syms.contains(&ps[0]) {
-                // if let Some()
+            if ps[0] == sym("pattern") {
+                if let Some(from_map) = named_map.get(&pat) {
+                    return &ex == from_map;
+                } else {
+                    if is_blank_match(ex.clone(), ps[2].clone()) {
+                        named_map.insert(pat.clone(), ex.clone());
+                        true
+                    } else {
+                        false
+                    }
+                }
+            } else if pat_syms.contains(&ps[0]) {
                 if is_blank_match(ex.clone(), pat.clone()) {
                     pos_map.insert(pos.clone(), ex);
                     true
@@ -227,24 +218,73 @@ fn my_match(
             }
         }
         (Expr::List(es), Expr::List(ps)) => {
-            if pat_syms.contains(&ps[0]) {
+            if ps[0] == sym("pattern") {
+                if let Some(from_map) = named_map.get(&pat) {
+                    return &ex == from_map;
+                } else {
+                    if is_blank_match(ex.clone(), ps[2].clone()) {
+                        named_map.insert(pat.clone(), ex.clone());
+                        return true;
+                    }
+                }
+            } else if pat_syms.contains(&ps[0]) {
                 if is_blank_match(ex.clone(), pat.clone()) {
                     pos_map.insert(pos.clone(), ex);
-                    return true
+                    return true;
                 }
             }
 
             let mut new_pos = pos.clone();
             new_pos.push(0); // we are at the head
-            if !my_match(es[0].clone(), ps[0].clone(), &new_pos, pos_map) {
+            if !my_match(es[0].clone(), ps[0].clone(), &new_pos, pos_map, named_map) {
                 return false;
             }
 
             'outer: for (i, pi) in ps.iter().enumerate().skip(1) {
                 let mut new_pos = pos.clone();
                 new_pos.push(i); // we are at the head
-                if head(pi.clone()) == sym("blank_seq") {
-                    'inner: for j in 1..=es[1..].len() {
+                if head(pi.clone()) == sym("pattern") {
+                    println!("in pattern pi ");
+                    if let Some(from_map) = named_map.get(&pi) {
+                        panic!("we should have rebuilt to remove this i think");
+                    }
+                    let b = &pi[2];
+                    let bt = &b[0];
+                    let p_name = &pi[1];
+                    if bt == &sym("blank_seq") {
+                        for j in 1..=es[1..].len() {
+                            let mut elts = vec![sym("sequence")];
+                            // im pretty sure this is not needed
+                            if i + j > es.len() {
+                                println!("breaking news!");
+                                break 'outer;
+                            }
+                            for seq_e in &es[i..i + j] {
+                                if b.len() == 2 {
+                                    let b_head = &b[1];
+                                    if b_head != &head(seq_e.clone()) {
+                                        break;
+                                    }
+                                }
+                                elts.push(seq_e.clone());
+                            }
+                            let seq = liste(elts);
+                            named_map.insert(pi.clone(), seq.clone());
+                            
+                            let new_pat = rebuild_and_splice(pat.clone(), &pos, pos_map, named_map);
+                            println!("new_pat in bs: at iter {j} {new_pat} {seq}");
+                            if my_match(ex.clone(), new_pat, pos, pos_map, named_map) {
+                                break 'outer;
+                            }
+                        }
+                    } else {
+                        // named blank case
+                        if !my_match(es[i].clone(), ps[i].clone(), &new_pos, pos_map, named_map) {
+                            break 'outer;
+                        }
+                    }
+                } else if head(pi.clone()) == sym("blank_seq") {
+                    for j in 1..=es[1..].len() {
                         let mut elts = vec![sym("sequence")];
                         // im pretty sure this is not needed
                         if i + j > es.len() {
@@ -263,13 +303,13 @@ fn my_match(
                         let seq = liste(elts);
                         pos_map.insert(new_pos.clone(), seq.clone());
 
-                        let new_pat = rebuild_and_splice(pat.clone(), &pos, pos_map);
+                        let new_pat = rebuild_and_splice(pat.clone(), &pos, pos_map, named_map);
                         println!("new_pat in bs: at iter {j} {new_pat}");
                         let mut copy = pos_map.clone();
                         // this is to avoid double application of a pos rule
                         copy.remove(&new_pos);
                         // if my_match(ex.clone(), pat.clone(), pos, &mut copy) {
-                        if my_match(ex.clone(), new_pat, pos, &mut copy) {
+                        if my_match(ex.clone(), new_pat, pos, &mut copy, named_map) {
                             pos_map.clear();
                             pos_map.extend(copy);
 
@@ -282,7 +322,7 @@ fn my_match(
                         }
                     }
                 } else {
-                    if !my_match(es[i].clone(), ps[i].clone(), &new_pos, pos_map) {
+                    if !my_match(es[i].clone(), ps[i].clone(), &new_pos, pos_map, named_map) {
                         break 'outer;
                     }
                 }
@@ -296,8 +336,8 @@ fn my_match(
             // so maybe its possible that we need to remove an entry in the map
             // i wonder if we could just not apply the rule if we dont see a blank there (meaning its already applied)
             // i feel like that is probably wrong somehow
-            let final_pat = rebuild_and_splice(pat.clone(), &pos, pos_map);
-            println!("final comparison: POS: {pos:?} | PAT: {pat} | NEW_PAT: {final_pat} | EX: {ex} || {pos_map:?}");
+            let final_pat = rebuild_and_splice(pat.clone(), &pos, pos_map, named_map);
+            println!("final comparison: POS: {pos:?} | PAT: {pat} | NEW_PAT: {final_pat} | EX: {ex} || pos {pos_map:?} || named {named_map:?}");
             if final_pat == ex {
                 return true;
             }
@@ -311,7 +351,7 @@ fn main() {
     let test_cases = vec![
         (sym("1"), sym("1"), true),         // goes to "1" == "1" Sym, Sym arm
         (sym("1"), parse("(blank)"), true), // Sym Sym arm with blank
-        // (sym("1"), Expr::List(vec![sym("1")]), false), // Sym List -> false
+        (sym("1"), Expr::List(vec![sym("1")]), false), // Sym List -> false
         // (Expr::List(vec![sym("1")]), sym("1"), false), // List Sym
         // // (1) | (blank)
         // (Expr::List(vec![sym("1")]), blank.clone(), true), // List, sym, with blank
@@ -389,16 +429,16 @@ fn main() {
         //     true,
         // ),
         // // pos : Vec<usize> where are we in the pattern Expr
-        // (
-        //     parse("(f (a b) (a c) (b d))"),
-        //     parse("(f (blank_seq a) (b d))"),
-        //     true,
-        // ),
-        // (
-        //     parse("(f (a b) (a c) (b d))"),
-        //     parse("(f (blank_seq a))"),
-        //     false,
-        // ),
+        (
+            parse("(f (a b) (a c) (b d))"),
+            parse("(f (blank_seq a) (b d))"),
+            true,
+        ),
+        (
+            parse("(f (a b) (a c) (b d))"),
+            parse("(f (blank_seq a))"),
+            false,
+        ),
         (parse("(f a b c)"), parse("(f (blank_seq))"), true),
         (parse("(f a b c)"), parse("((blank) (blank_seq))"), true),
         (parse("((k a) b)"), parse("((k a) b)"), true),
@@ -430,6 +470,18 @@ fn main() {
         (parse("(f (a b))"), parse("(f (blank))"), true),
         (parse("(f (a b))"), parse("(f (blank a))"), true),
         (parse("(f x)"), parse("((blank) (blank))"), true),
+        // starting named patterns
+        (parse("f"), parse("(pattern x (blank))"), true),
+        (parse("f"), parse("(pattern x (blank_seq))"), true),
+        (parse("(f)"), parse("(pattern x (blank))"), true),
+        (parse("(f)"), parse("(pattern x (blank_seq))"), true),
+        (parse("(f a)"), parse("(f (pattern x (blank_seq)))"), true),
+        (parse("(f a)"), parse("(f (pattern x (blank)))"), true),
+
+        (parse("(f (a b) (a c))"), parse("(f (blank_seq a))"), true),
+        (parse("(f (a b) (a c))"), parse("(f (blank_seq b))"), false),
+        
+        (parse("(f (a b) (a c))"), parse("(f (pattern x (blank_seq a)))"), true),
     ];
 
     // list(vec!["f", "a", "b", "c"]), list(vec!["f", sym("blank_sequence")])
@@ -437,10 +489,12 @@ fn main() {
         println!("testing case {i}: {ex} | {pat} ");
         let pos = vec![];
         let mut pos_map = HashMap::new();
-        // let mut named_map = HashMap::new();
-        let m = my_match(ex.clone(), pat.clone(), &pos, &mut pos_map);
-        let rebuilt_ex = rebuild_and_splice(pat.clone(), &vec![], &pos_map);
-        println!("ex: {ex} | rebuilt:{rebuilt_ex}\n\npos:\n{pos_map:?}\n\n\n");
+        let mut named_map = HashMap::new();
+        let m = my_match(ex.clone(), pat.clone(), &pos, &mut pos_map, &mut named_map);
+        let rebuilt_ex = rebuild_and_splice(pat.clone(), &vec![], &pos_map, &named_map);
+        println!(
+            "ex: {ex} | rebuilt:{rebuilt_ex}\n\npos:\n{pos_map:?}\nnamed:\n{named_map:?}\n\n\n"
+        );
 
         assert_eq!(m, *expected);
 
