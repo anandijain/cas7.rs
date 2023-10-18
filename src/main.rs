@@ -277,6 +277,32 @@ fn my_match(
                                 break 'outer;
                             }
                         }
+                    } else if bt == &sym("blank_null_seq") {
+                        for j in 0..=es[1..].len() {
+                            let mut elts = vec![sym("sequence")];
+                            // im pretty sure this is not needed
+                            if i + j > es.len() {
+                                println!("breaking news!");
+                                break 'outer;
+                            }
+                            for seq_e in &es[i..i + j] {
+                                if b.len() == 2 {
+                                    let b_head = &b[1];
+                                    if b_head != &head(seq_e.clone()) {
+                                        break;
+                                    }
+                                }
+                                elts.push(seq_e.clone());
+                            }
+                            let seq = liste(elts);
+                            named_map.insert(pi.clone(), seq.clone());
+
+                            let new_pat = rebuild_and_splice(pat.clone(), &pos, pos_map, named_map);
+                            println!("new_pat in bs: at iter {j} {new_pat} {seq}");
+                            if my_match(ex.clone(), new_pat, pos, pos_map, named_map) {
+                                break 'outer;
+                            }
+                        }
                     } else {
                         // named blank case
                         if !my_match(es[i].clone(), ps[i].clone(), &new_pos, pos_map, named_map) {
@@ -285,6 +311,44 @@ fn my_match(
                     }
                 } else if head(pi.clone()) == sym("blank_seq") {
                     for j in 1..=es[1..].len() {
+                        let mut elts = vec![sym("sequence")];
+                        // im pretty sure this is not needed
+                        if i + j > es.len() {
+                            println!("breaking news!");
+                            break 'outer;
+                        }
+                        for seq_e in &es[i..i + j] {
+                            if pi.len() == 2 {
+                                let b_head = &pi[1];
+                                if b_head != &head(seq_e.clone()) {
+                                    break;
+                                }
+                            }
+                            elts.push(seq_e.clone());
+                        }
+                        let seq = liste(elts);
+                        pos_map.insert(new_pos.clone(), seq.clone());
+
+                        let new_pat = rebuild_and_splice(pat.clone(), &pos, pos_map, named_map);
+                        println!("new_pat in bs: at iter {j} {new_pat}");
+                        let mut copy = pos_map.clone();
+                        // this is to avoid double application of a pos rule
+                        copy.remove(&new_pos);
+                        // if my_match(ex.clone(), pat.clone(), pos, &mut copy) {
+                        if my_match(ex.clone(), new_pat, pos, &mut copy, named_map) {
+                            pos_map.clear();
+                            pos_map.extend(copy);
+
+                            pos_map.insert(new_pos.clone(), seq.clone());
+
+                            break 'outer;
+                        } else {
+                            // break 'outer;
+                            // i think we need to revert pos_map to whatever it was before this my_match call
+                        }
+                    }
+                } else if head(pi.clone()) == sym("blank_null_seq") {
+                    for j in 0..=es[1..].len() {
                         let mut elts = vec![sym("sequence")];
                         // im pretty sure this is not needed
                         if i + j > es.len() {
@@ -345,7 +409,6 @@ fn main() {
         (sym("1"), Expr::List(vec![sym("1")]), false), // Sym List -> false
         (Expr::List(vec![sym("1")]), sym("1"), false), // List Sym
         // (1) | (blank)
-
         (parse("f"), parse("(pattern x (blank))"), true),
         (parse("(f)"), parse("(pattern x (blank))"), true),
         (parse("(f x)"), parse("((pattern x (blank)) (blank))"), true),
@@ -369,22 +432,11 @@ fn main() {
             parse("(f (pattern x (blank_seq)))"),
             true,
         ),
-        // (
-        //     parse("(f a)"),
-        //     parse("(f (pattern x (blank_null_seq)))"),
-        //     true,
-        // ),
-        // (
-        //     parse("(f a)"),
-        //     parse("(f (pattern x (blank_null_seq)) a)"),
-        //     true,
-        // ),
         (
             parse("(f a b c a b)"),
             parse("(f (pattern x (blank_seq)) c (pattern x (blank_seq)))"),
             true,
         ),
-
         (
             parse("(f (a b) c a b)"),
             parse("(f (pattern x (blank b)) (pattern y (blank_seq)))"),
@@ -465,6 +517,29 @@ fn main() {
         (
             parse("(f (a b) (a c))"),
             parse("(f (pattern x (blank_seq a)))"),
+            true,
+        ),
+        // unnamed bns
+        (
+            parse("((k a b b) b)"),
+            parse("((k (blank_null_seq) a b b) b)"),
+            true,
+        ),
+        (
+            parse("(f (a b) (a c))"),
+            parse("(f (blank_null_seq a))"),
+            true,
+        ),
+        
+        // named bns
+        (
+            parse("(f a)"),
+            parse("(f (pattern x (blank_null_seq)))"),
+            true,
+        ),
+        (
+            parse("(f a)"),
+            parse("(f (pattern x (blank_null_seq)) a)"),
             true,
         ),
     ];
