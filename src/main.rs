@@ -270,7 +270,7 @@ fn my_match(
                             }
                             let seq = liste(elts);
                             named_map.insert(pi.clone(), seq.clone());
-                            
+
                             let new_pat = rebuild_and_splice(pat.clone(), &pos, pos_map, named_map);
                             println!("new_pat in bs: at iter {j} {new_pat} {seq}");
                             if my_match(ex.clone(), new_pat, pos, pos_map, named_map) {
@@ -327,15 +327,6 @@ fn my_match(
                     }
                 }
             }
-            // in the case of (f a b b) | (f (blank_seq))
-            // the problem is we end up with somehow pat is (f a b) with a map [1] -> (seq a b)
-            // which then rebuild ends up changing (f a b) -> (f a b b) prematurely giving equality.
-            // we get pat (f a) but still have [1]->a  and so we do a->a a second time.
-            // which isnt aproblem on that iteration but if you do (f (blank_seq)) -> [1]-> seq a b
-            // you get (f a b), then apply [1] -> seq a b again and you get (f a b b) which returns a, b as the "correct seq" for [1]
-            // so maybe its possible that we need to remove an entry in the map
-            // i wonder if we could just not apply the rule if we dont see a blank there (meaning its already applied)
-            // i feel like that is probably wrong somehow
             let final_pat = rebuild_and_splice(pat.clone(), &pos, pos_map, named_map);
             println!("final comparison: POS: {pos:?} | PAT: {pat} | NEW_PAT: {final_pat} | EX: {ex} || pos {pos_map:?} || named {named_map:?}");
             if final_pat == ex {
@@ -352,40 +343,32 @@ fn main() {
         (sym("1"), sym("1"), true),         // goes to "1" == "1" Sym, Sym arm
         (sym("1"), parse("(blank)"), true), // Sym Sym arm with blank
         (sym("1"), Expr::List(vec![sym("1")]), false), // Sym List -> false
-        // (Expr::List(vec![sym("1")]), sym("1"), false), // List Sym
-        // // (1) | (blank)
-        // (Expr::List(vec![sym("1")]), blank.clone(), true), // List, sym, with blank
-        // (lhs.clone(), rhs.clone(), false),                 // List, sym, with blank
-        // // (lhs.clone(), list(vec!["f", "blank", "blank"]), true), // List, sym, with blank
-        // (
-        //     lhs.clone(),
-        //     liste(vec![sym("f"), blank.clone(), blank.clone()]),
-        //     true,
-        // ), // List, sym, with blank
+        (Expr::List(vec![sym("1")]), sym("1"), false), // List Sym
+        // (1) | (blank)
 
-        // (parse("f"), parse("(pattern x (blank))"), true),
-        // (parse("(f)"), parse("(pattern x (blank))"), true),
-        // (parse("(f x)"), parse("((pattern x (blank)) (blank))"), true),
-        // (
-        //     parse("(f a b c)"),
-        //     parse("(f (pattern x (blank_seq)))"),
-        //     true,
-        // ),
-        // (
-        //     parse("(f a b c)"),
-        //     parse("(f (pattern x (blank_seq)) (pattern y (blank_seq)))"),
-        //     true,
-        // ),
-        // (
-        //     parse("(f a a)"),
-        //     parse("(f (pattern x (blank_seq)) (pattern x (blank_seq)))"),
-        //     true,
-        // ),
-        // (
-        //     parse("(f a (g b))"),
-        //     parse("(f (pattern x (blank_seq)))"),
-        //     true,
-        // ),
+        (parse("f"), parse("(pattern x (blank))"), true),
+        (parse("(f)"), parse("(pattern x (blank))"), true),
+        (parse("(f x)"), parse("((pattern x (blank)) (blank))"), true),
+        (
+            parse("(f a b c)"),
+            parse("(f (pattern x (blank_seq)))"),
+            true,
+        ),
+        (
+            parse("(f a b c)"),
+            parse("(f (pattern x (blank_seq)) (pattern y (blank_seq)))"),
+            true,
+        ),
+        (
+            parse("(f a a)"),
+            parse("(f (pattern x (blank_seq)) (pattern x (blank_seq)))"),
+            true,
+        ),
+        (
+            parse("(f a (g b))"),
+            parse("(f (pattern x (blank_seq)))"),
+            true,
+        ),
         // (
         //     parse("(f a)"),
         //     parse("(f (pattern x (blank_null_seq)))"),
@@ -396,38 +379,38 @@ fn main() {
         //     parse("(f (pattern x (blank_null_seq)) a)"),
         //     true,
         // ),
-        // (
-        //     parse("(f a b c a b)"),
-        //     parse("(f (pattern x (blank_seq)) c (pattern x (blank_seq)))"),
-        //     true,
-        // ),
+        (
+            parse("(f a b c a b)"),
+            parse("(f (pattern x (blank_seq)) c (pattern x (blank_seq)))"),
+            true,
+        ),
 
-        // (
-        //     parse("(f (a b) c a b)"),
-        //     parse("(f (pattern x (blank b)) (pattern y (blank_seq)))"),
-        //     false,
-        // ),
-        // (
-        //     parse("(f (a b) c a b)"),
-        //     parse("(f (pattern x (blank a)) (pattern y (blank_seq)))"),
-        //     true,
-        // ),
-        // (
-        //     parse("(f a b c d)"),
-        //     parse("(f (blank_seq) (pattern y (blank_seq)))"),
-        //     true,
-        // ),
-        // // fails todo fix blank_seq with head
-        // (
-        //     parse("(f (a b) (a c) (b d))"),
-        //     parse("(f (pattern x (blank_seq a)))"),
-        //     false,
-        // ),
-        // (
-        //     parse("(f (a b) (a c) (b d))"),
-        //     parse("(f (pattern x (blank_seq a)) (b d))"),
-        //     true,
-        // ),
+        (
+            parse("(f (a b) c a b)"),
+            parse("(f (pattern x (blank b)) (pattern y (blank_seq)))"),
+            false,
+        ),
+        (
+            parse("(f (a b) c a b)"),
+            parse("(f (pattern x (blank a)) (pattern y (blank_seq)))"),
+            true,
+        ),
+        (
+            parse("(f a b c d)"),
+            parse("(f (blank_seq) (pattern y (blank_seq)))"),
+            true,
+        ),
+        // fails todo fix blank_seq with head
+        (
+            parse("(f (a b) (a c) (b d))"),
+            parse("(f (pattern x (blank_seq a)))"),
+            false,
+        ),
+        (
+            parse("(f (a b) (a c) (b d))"),
+            parse("(f (pattern x (blank_seq a)) (b d))"),
+            true,
+        ),
         // // pos : Vec<usize> where are we in the pattern Expr
         (
             parse("(f (a b) (a c) (b d))"),
@@ -477,11 +460,13 @@ fn main() {
         (parse("(f)"), parse("(pattern x (blank_seq))"), true),
         (parse("(f a)"), parse("(f (pattern x (blank_seq)))"), true),
         (parse("(f a)"), parse("(f (pattern x (blank)))"), true),
-
         (parse("(f (a b) (a c))"), parse("(f (blank_seq a))"), true),
         (parse("(f (a b) (a c))"), parse("(f (blank_seq b))"), false),
-        
-        (parse("(f (a b) (a c))"), parse("(f (pattern x (blank_seq a)))"), true),
+        (
+            parse("(f (a b) (a c))"),
+            parse("(f (pattern x (blank_seq a)))"),
+            true,
+        ),
     ];
 
     // list(vec!["f", "a", "b", "c"]), list(vec!["f", sym("blank_sequence")])
